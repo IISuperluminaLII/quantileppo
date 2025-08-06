@@ -29,6 +29,46 @@ class QuantileDistribution(Distribution):
 
         return log_prob
 
+    # Method 2: Piecewise-Linear Interpolation
+    def log_prob_piecewise_linear(self, value: torch.Tensor) -> torch.Tensor:
+        sorted_qvals, indices = torch.sort(self.quantile_values, dim=-2)
+        sorted_tau = torch.gather(self.tau.expand_as(sorted_qvals), -2, indices)
+
+        value_exp = value.unsqueeze(-2)
+
+        # Find intervals for values
+        greater = (value_exp >= sorted_qvals).float().sum(dim=-2, keepdim=True).long()
+        interval_idx = greater.clamp(min=1, max=sorted_qvals.shape[-2] - 1)
+
+        left_idx = interval_idx - 1
+        right_idx = interval_idx
+
+        left_val = sorted_qvals.gather(-2, left_idx)
+        right_val = sorted_qvals.gather(-2, right_idx)
+        left_tau = sorted_tau.gather(-2, left_idx)
+        right_tau = sorted_tau.gather(-2, right_idx)
+
+        width = (right_val - left_val).clamp(min=1e-8)
+        prob_mass = (right_tau - left_tau).clamp(min=1e-8)
+
+        density = prob_mass / width
+        log_prob = torch.log(density + 1e-12).squeeze(-2)
+
+        return log_prob
+
+    # Method 3: Kernel Density Estimation (Gaussian Kernel)
+    def log_prob_kde(self, value: torch.Tensor, bandwidth: float = 0.1) -> torch.Tensor:
+        # Gaussian KDE
+        quantiles = self.quantile_values
+        diff = value.unsqueeze(-2) - quantiles  # [batch..., n_quantiles, dim]
+
+        # Compute Gaussian kernel (standard normal PDF)
+        kernel_vals = torch.exp(-0.5 * (diff / bandwidth) ** 2) / (bandwidth * (2 * torch.pi) ** 0.5)
+        density = kernel_vals.mean(dim=-2)
+
+        log_prob = torch.log(density + 1e-12)
+        return log_prob
+
     def sample(self, sample_shape: torch.Size = torch.Size((1,))) -> torch.Tensor:
         n_quantiles = self.quantile_values.shape[-2]
         flat_shape = self.quantile_values.shape[:-2] + sample_shape
