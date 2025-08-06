@@ -153,10 +153,8 @@ class QuantilePPO(OnPolicyAlgorithm):
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
                 # Unpack policy outputs
-                values, log_prob, entropy, quantiles, taus = self.policy.evaluate_actions(
-                    rollout_data.observations,
-                    rollout_data.actions.long() if self.discrete else rollout_data.actions,
-                )
+                values, log_prob, entropy, quantiles, taus = self.policy.evaluate_actions(rollout_data.observations,
+                    rollout_data.actions.long() if self.discrete else rollout_data.actions,)
 
                 # Policy loss
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
