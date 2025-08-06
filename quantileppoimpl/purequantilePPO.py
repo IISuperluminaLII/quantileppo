@@ -8,9 +8,9 @@ from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
 
-from quantile_head import QuantileHead
-from quantile_distribution import QuantileDistribution
-from quantile_loss import QuantileLoss
+from utilities import QuantileHead
+from utilities import QuantileDistribution
+from utilities import QuantileLoss
 
 
 class QuantileActorCriticPolicy(ActorCriticPolicy):
@@ -207,13 +207,6 @@ class QuantilePPO(OnPolicyAlgorithm):
                 # Critic: quantile regression loss only
                 returns = rollout_data.returns.unsqueeze(-1)
                 value_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
-
-                # Entropy bonus
-                entropy_loss = -entropy.mean()
-
-                # Combined loss
-                loss = pg_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
-                value_loss = qr_loss + nll_loss
 
                 # Entropy bonus
                 entropy_loss = -entropy.mean()
