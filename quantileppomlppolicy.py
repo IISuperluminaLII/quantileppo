@@ -1,13 +1,12 @@
 # new_canvas_quantile_ppo_demo.py
 
 import gym
-import numpy as np
 
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 # Import your QuantilePPO (which extends OnPolicyAlgorithm)
-from quantilePPO import QuantilePPO
+from quantileppoimpl.quantilePPO import QuantilePPO
 
 def make_env(env_id: str, rank: int, seed: int = 0):
     """
