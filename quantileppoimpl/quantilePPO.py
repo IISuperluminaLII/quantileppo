@@ -7,10 +7,9 @@ from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
-from stable_baselines3.common.features_extractor import BaseFeaturesExtractor, FlattenExtractor
-from quantile_head import QuantileHead
-from quantile_distribution import QuantileDistribution
-from quantile_loss import QuantileLoss
+from utilities import QuantileHead
+from utilities import QuantileDistribution
+from utilities import QuantileLoss
 
 
 class QuantileActorCriticPolicy(ActorCriticPolicy):
@@ -32,7 +31,6 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         sde_net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         use_expln: bool = False,
         squash_output: bool = False,
-        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
@@ -52,7 +50,6 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             sde_net_arch=sde_net_arch,
             use_expln=use_expln,
             squash_output=squash_output,
-            features_extractor_class=features_extractor_class,
             features_extractor_kwargs=features_extractor_kwargs,
             normalize_images=normalize_images,
             optimizer_class=optimizer_class,
@@ -192,10 +189,8 @@ class QuantilePPO(OnPolicyAlgorithm):
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
                 # Evaluate actions and obtain q_dist
-                values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(
-                    rollout_data.observations,
-                    rollout_data.actions.long() if self.discrete else rollout_data.actions,
-                )
+                values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(rollout_data.observations,
+                    rollout_data.actions.long() if self.discrete else rollout_data.actions,)
 
                 # Policy gradient loss
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
