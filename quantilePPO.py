@@ -1,13 +1,13 @@
 import torch as th
-from torch import nn
-from torch.nn import functional as F
 from typing import Any, Callable, Dict, Optional, Type, Union
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.buffers import RolloutBuffer
+from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
+
 from utilities import QuantileHead
 from utilities import QuantileDistribution
+from utilities import QuantileLoss
 
 
 class QuantileActorCriticPolicy(ActorCriticPolicy):
@@ -24,33 +24,28 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         self.n_quantiles = n_quantiles
         # Remove default value network
         self.value_net = None
-        # Define quantile head for value estimation
+        # Quantile head and loss
         self.quantile_head = QuantileHead(
             input_dim=self.mlp_extractor.latent_dim,
             output_dim=1,
             n_quantiles=self.n_quantiles,
             hidden_dim=self.mlp_extractor.latent_dim,
         )
+        self.quantile_loss = QuantileLoss()
 
     def forward(self, obs: th.Tensor, deterministic: bool = False):
-        # Standard feature extraction
         features = self.extract_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(features)
 
-        # Action distribution
-        distribution = self._get_action_dist_from_latent(latent_pi)
-        actions = distribution.get_actions(deterministic=deterministic)
-        log_prob = distribution.log_prob(actions)
+        dist = self._get_action_dist_from_latent(latent_pi)
+        actions = dist.get_actions(deterministic=deterministic)
+        log_prob = dist.log_prob(actions)
 
-        # Sample taus uniformly
         batch_size = obs.size(0)
         taus = th.rand(batch_size, self.n_quantiles, 1, device=obs.device)
-        # Get quantiles
         quantiles = self.quantile_head(latent_vf, tau=taus)
 
-        # Build distribution over returns
         q_dist = QuantileDistribution(quantile_values=quantiles, tau=taus)
-        # Use mean as scalar value
         values = q_dist.mean
 
         return actions, values, log_prob
@@ -60,7 +55,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         obs: th.Tensor,
         actions: th.Tensor,
     ):
-        # Called during training
+        # Maintain SB3 signature: returns values, log_prob, entropy, then extras
         features = self.extract_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(features)
 
@@ -75,12 +70,13 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         q_dist = QuantileDistribution(quantile_values=quantiles, tau=taus)
         values = q_dist.mean
 
-        return values, log_prob, entropy, quantiles, taus, q_dist
+        # Return in standard order for OnPolicyAlgorithm
+        return values, log_prob, entropy, quantiles, taus
 
 
 class QuantilePPO(OnPolicyAlgorithm):
     """
-    Quantile-PPO implemented by extending OnPolicyAlgorithm.
+    Quantile-PPO by extending OnPolicyAlgorithm and using quantile loss.
     """
     def __init__(
         self,
@@ -106,14 +102,10 @@ class QuantilePPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
-        # Prepare policy_kwargs including n_quantiles
-        default_policy_kwargs = dict(
-            n_quantiles=n_quantiles,
-        )
-        if policy_kwargs is not None:
+        default_policy_kwargs = dict(n_quantiles=n_quantiles)
+        if policy_kwargs:
             default_policy_kwargs.update(policy_kwargs)
 
-        # Initialize base OnPolicyAlgorithm without setting up the model
         super().__init__(
             policy,
             env,
@@ -139,9 +131,7 @@ class QuantilePPO(OnPolicyAlgorithm):
         self.n_epochs = n_epochs
         self.clip_range = clip_range
         self.clip_range_vf = clip_range_vf
-        self.target_kl = target_kl
 
-        # Buffer for storing rollouts
         self.rollout_buffer = RolloutBuffer(
             buffer_size=self.n_steps,
             observation_space=self.observation_space,
@@ -156,25 +146,19 @@ class QuantilePPO(OnPolicyAlgorithm):
             self._setup_model()
 
     def train(self) -> None:
-        # Update learning rate
         self._update_learning_rate(self.policy.optimizer)
-
-        # Calculate current clip ranges
         clip_range = self.clip_range(self._current_progress_remaining)
-        clip_range_vf = None
-        if self.clip_range_vf is not None:
-            clip_range_vf = self.clip_range_vf(self._current_progress_remaining)
+        clip_range_vf = self.clip_range_vf(self._current_progress_remaining) if self.clip_range_vf else None
 
-        # Training epochs
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
-                # Re-evaluate actions and values
-                values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(
+                # Unpack policy outputs
+                values, log_prob, entropy, quantiles, taus = self.policy.evaluate_actions(
                     rollout_data.observations,
                     rollout_data.actions.long() if self.discrete else rollout_data.actions,
                 )
 
-                # Policy gradient loss
+                # Policy loss
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
                 adv = rollout_data.advantages
                 adv = (adv - adv.mean()) / (adv.std() + 1e-8)
@@ -183,32 +167,16 @@ class QuantilePPO(OnPolicyAlgorithm):
                     adv * th.clamp(ratio, 1 - clip_range, 1 + clip_range),
                 ).mean()
 
-                # Critic loss: negative log-likelihood under quantile distribution
+                # Critic loss via quantile regression
                 returns = rollout_data.returns.unsqueeze(-1)
-                value_loss = -q_dist.log_prob(returns).mean()
+                value_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
 
-                # Entropy bonus
+                # Entropy
                 entropy_loss = -entropy.mean()
 
-                # Combined loss
                 loss = pg_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
                 self.policy.optimizer.zero_grad()
                 loss.backward()
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
-    def learn(
-        self,
-        total_timesteps: int,
-        callback: Optional[Any] = None,
-        log_interval: int = 1,
-        tb_log_name: str = "QuantilePPO",
-        reset_num_timesteps: bool = True,
-    ):  # pragma: no cover
-        return super().learn(
-            total_timesteps,
-            callback=callback,
-            log_interval=log_interval,
-            tb_log_name=tb_log_name,
-            reset_num_timesteps=reset_num_timesteps,
-        )
