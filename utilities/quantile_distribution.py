@@ -69,6 +69,25 @@ class QuantileDistribution(Distribution):
         log_prob = torch.log(density + 1e-12)
         return log_prob
 
+    def log_prob_kde_silverman(self, value: torch.Tensor) -> torch.Tensor:
+        # Silverman's rule-of-thumb for bandwidth selection
+        quantiles = self.quantile_values
+        stddev = quantiles.std(dim=-2, unbiased=True, keepdim=True)
+        n_quantiles = quantiles.shape[-2]
+
+        # Silverman's rule: bandwidth = 1.06 * stddev * n^{-1/5}
+        bandwidth = 1.06 * stddev * (n_quantiles ** (-1 / 5))
+        bandwidth = bandwidth.clamp(min=1e-3)  # avoid zero bandwidth
+
+        diff = value.unsqueeze(-2) - quantiles  # [batch..., n_quantiles, dim]
+
+        # Gaussian kernel calculation
+        kernel_vals = torch.exp(-0.5 * (diff / bandwidth) ** 2) / (bandwidth * (2 * torch.pi) ** 0.5)
+        density = kernel_vals.mean(dim=-2)
+
+        log_prob = torch.log(density + 1e-12)
+        return log_prob
+
     def sample(self, sample_shape: torch.Size = torch.Size((1,))) -> torch.Tensor:
         n_quantiles = self.quantile_values.shape[-2]
         flat_shape = self.quantile_values.shape[:-2] + sample_shape
