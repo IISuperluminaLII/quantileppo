@@ -200,10 +200,6 @@ class QuantilePPO(OnPolicyAlgorithm):
                     adv * th.clamp(ratio, 1 - clip_range, 1 + clip_range),
                 ).mean()
 
-                # Critic: quantile regression loss
-                returns = rollout_data.returns.unsqueeze(-1)
-                qr_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
-
                 # Critic: quantile regression loss only
                 returns = rollout_data.returns.unsqueeze(-1)
                 value_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
