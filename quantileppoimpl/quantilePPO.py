@@ -92,7 +92,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         obs: th.Tensor,
         actions: th.Tensor,
     ):
-        # Returns (values, log_prob, entropy, quantiles, taus, q_dist)
+
         features = self.extract_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(features)
 
@@ -188,7 +188,8 @@ class QuantilePPO(OnPolicyAlgorithm):
 
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
-                # Evaluate actions and obtain q_dist
+
+                # Evaluate actions and obtain q_dist for approximate the log_probs
                 values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(rollout_data.observations,
                     rollout_data.actions.long() if self.discrete else rollout_data.actions,)
 
@@ -205,7 +206,8 @@ class QuantilePPO(OnPolicyAlgorithm):
                 returns = rollout_data.returns.unsqueeze(-1)
                 qr_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
 
-                # Critic: negative log-prob from quantile distribution
+                # Critic loss
+                #Turn maximization to minimization by multiplying by -1
                 nll_loss = -q_dist.log_prob(returns).mean()
 
                 # Combine losses (you can weight or choose one)
@@ -214,7 +216,9 @@ class QuantilePPO(OnPolicyAlgorithm):
                 # Entropy bonus
                 entropy_loss = -entropy.mean()
 
+                #PPO loss + quantile loss + entropy bonus
                 loss = pg_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
                 self.policy.optimizer.zero_grad()
                 loss.backward()
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
