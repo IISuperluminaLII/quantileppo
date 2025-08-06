@@ -1,13 +1,16 @@
 import torch as th
-from typing import Any, Callable, Dict, Optional, Type, Union
+from torch import nn
+from torch.nn import functional as F
+from typing import Any, Callable, Dict, List, Optional, Type, Union
+from gym import spaces
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
-
-from utilities import QuantileHead
-from utilities import QuantileDistribution
-from utilities import QuantileLoss
+from stable_baselines3.common.features_extractor import BaseFeaturesExtractor, FlattenExtractor
+from quantile_head import QuantileHead
+from quantile_distribution import QuantileDistribution
+from quantile_loss import QuantileLoss
 
 
 class QuantileActorCriticPolicy(ActorCriticPolicy):
@@ -16,20 +19,57 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
     """
     def __init__(
         self,
-        *args,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        lr_schedule: Callable[[float], float],
         n_quantiles: int = 32,
-        **kwargs,
+        net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
+        activation_fn: Type[nn.Module] = nn.Tanh,
+        ortho_init: bool = True,
+        use_sde: bool = False,
+        log_std_init: float = -2.0,
+        full_std: bool = True,
+        sde_net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
+        use_expln: bool = False,
+        squash_output: bool = False,
+        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
+        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        normalize_images: bool = True,
+        optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
+        _init_setup_model: bool = True,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            observation_space,
+            action_space,
+            lr_schedule,
+            net_arch=net_arch,
+            activation_fn=activation_fn,
+            ortho_init=ortho_init,
+            use_sde=use_sde,
+            log_std_init=log_std_init,
+            full_std=full_std,
+            sde_net_arch=sde_net_arch,
+            use_expln=use_expln,
+            squash_output=squash_output,
+            features_extractor_class=features_extractor_class,
+            features_extractor_kwargs=features_extractor_kwargs,
+            normalize_images=normalize_images,
+            optimizer_class=optimizer_class,
+            optimizer_kwargs=optimizer_kwargs,
+            _init_setup_model=_init_setup_model,
+        )
         self.n_quantiles = n_quantiles
-        # Remove default value network
+        # Remove scalar value network
         self.value_net = None
-        # Quantile head and loss
+        # Quantile head and quantile loss
         self.quantile_head = QuantileHead(
             input_dim=self.mlp_extractor.latent_dim,
             output_dim=1,
             n_quantiles=self.n_quantiles,
+            n_basis=64,
             hidden_dim=self.mlp_extractor.latent_dim,
+            device=self.device,
         )
         self.quantile_loss = QuantileLoss()
 
@@ -55,7 +95,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         obs: th.Tensor,
         actions: th.Tensor,
     ):
-        # Maintain SB3 signature: returns values, log_prob, entropy, then extras
+        # Returns (values, log_prob, entropy, quantiles, taus, q_dist)
         features = self.extract_features(obs)
         latent_pi, latent_vf = self.mlp_extractor(features)
 
@@ -70,13 +110,12 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         q_dist = QuantileDistribution(quantile_values=quantiles, tau=taus)
         values = q_dist.mean
 
-        # Return in standard order for OnPolicyAlgorithm
-        return values, log_prob, entropy, quantiles, taus
+        return values, log_prob, entropy, quantiles, taus, q_dist
 
 
 class QuantilePPO(OnPolicyAlgorithm):
     """
-    Quantile-PPO by extending OnPolicyAlgorithm and using quantile loss.
+    Quantile-PPO by extending OnPolicyAlgorithm and using quantile regression and distribution log-prob.
     """
     def __init__(
         self,
@@ -152,11 +191,13 @@ class QuantilePPO(OnPolicyAlgorithm):
 
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
-                # Unpack policy outputs
-                values, log_prob, entropy, quantiles, taus = self.policy.evaluate_actions(rollout_data.observations,
-                    rollout_data.actions.long() if self.discrete else rollout_data.actions,)
+                # Evaluate actions and obtain q_dist
+                values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(
+                    rollout_data.observations,
+                    rollout_data.actions.long() if self.discrete else rollout_data.actions,
+                )
 
-                # Policy loss
+                # Policy gradient loss
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
                 adv = rollout_data.advantages
                 adv = (adv - adv.mean()) / (adv.std() + 1e-8)
@@ -165,11 +206,17 @@ class QuantilePPO(OnPolicyAlgorithm):
                     adv * th.clamp(ratio, 1 - clip_range, 1 + clip_range),
                 ).mean()
 
-                # Critic loss via quantile regression
+                # Critic: quantile regression loss
                 returns = rollout_data.returns.unsqueeze(-1)
-                value_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
+                qr_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
 
-                # Entropy
+                # Critic: negative log-prob from quantile distribution
+                nll_loss = -q_dist.log_prob(returns).mean()
+
+                # Combine losses (you can weight or choose one)
+                value_loss = qr_loss + nll_loss
+
+                # Entropy bonus
                 entropy_loss = -entropy.mean()
 
                 loss = pg_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
@@ -177,4 +224,3 @@ class QuantilePPO(OnPolicyAlgorithm):
                 loss.backward()
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
-
