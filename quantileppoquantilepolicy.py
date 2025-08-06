@@ -4,7 +4,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 # Import your custom QuantilePPO and its policy
-from quantileppoimpl.quantilePPO import QuantilePPO, QuantileActorCriticPolicy
+from quantileppoimpl.piecewisequantilePPO import QuantilePPO, QuantileActorCriticPolicy
 
 
 def make_env(env_id: str, rank: int, seed: int = 0):
