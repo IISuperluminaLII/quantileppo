@@ -207,7 +207,7 @@ class QuantilePPO(OnPolicyAlgorithm):
                 qr_loss = self.policy.quantile_loss(pred=quantiles, target=returns, tau=taus)
 
                 # Critic loss
-                #Turn maximization to minimization by multiplying by -1
+                #Turns log-likelihood maximization problem into minimization by multiplying by -1
                 nll_loss = -q_dist.log_prob(returns).mean()
 
                 # Combine losses (you can weight or choose one)
