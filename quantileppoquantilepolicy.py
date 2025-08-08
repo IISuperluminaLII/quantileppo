@@ -77,14 +77,12 @@ class RewardPlotCallback(BaseCallback):
 
 
 
+# --- in your main block, wire the callback and plot after training ---
 if __name__ == '__main__':
     env_id = "CartPole-v1"
-    num_cpu = 4  # Number of processes to use
-
-    # Create the vectorized environment
+    num_cpu = 4
     env = SubprocVecEnv([make_env(env_id, i) for i in range(num_cpu)])
 
-    # Instantiate QuantilePPO with the custom QuantileActorCriticPolicy
     model = QuantilePPO(
         policy=QuantileActorCriticPolicy,
         env=env,
@@ -102,12 +100,16 @@ if __name__ == '__main__':
         seed=0,
     )
 
-    # Train the model
-    model.learn(total_timesteps=25_000)
+    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
+    model.learn(total_timesteps=25_000, callback=reward_cb)
 
-    # Evaluate the learned policy
+    # Save a final plot
+    reward_cb.plot(save_path="plots/reward_curve.png")
+
+    # (optional) quick eval loop (render may be a no-op on VecEnvs)
     obs = env.reset()
     for _ in range(1_000):
         action, _states = model.predict(obs)
         obs, rewards, dones, info = env.step(action)
         env.render()
+
