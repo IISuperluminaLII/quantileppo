@@ -8,7 +8,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 # Import your custom QuantilePPO and its policy
-from quantileppoimpl.piecewisequantilePPO import QuantilePPO, QuantileActorCriticPolicy
+from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPolicy
 
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback
@@ -92,7 +92,7 @@ class RewardPlotCallback(BaseCallback):
 if __name__ == '__main__':
     env_id = "CartPole-v1"
     num_cpu = 4
-    env = SubprocVecEnv([make_env(env_id, i) for i in range(num_cpu)])
+    env = SubprocVecEnv([make_env(env_id, i, 1234) for i in range(num_cpu)])
 
     model = QuantilePPO(
         policy=QuantileActorCriticPolicy,

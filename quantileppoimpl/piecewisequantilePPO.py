@@ -47,14 +47,12 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             use_sde=use_sde,
             log_std_init=log_std_init,
             full_std=full_std,
-            sde_net_arch=sde_net_arch,
             use_expln=use_expln,
             squash_output=squash_output,
             features_extractor_kwargs=features_extractor_kwargs,
             normalize_images=normalize_images,
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
-            _init_setup_model=_init_setup_model,
         )
         self.n_quantiles = n_quantiles
         # Remove scalar value network
