@@ -130,7 +130,7 @@ class QuantilePPO(OnPolicyAlgorithm):
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
         target_kl: Optional[float] = None,
-        tensorboard_log: Optional[str] = None,
+        tensorboard_log: Optional[str] = "tensorboards/",
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
         seed: Optional[int] = None,
@@ -208,6 +208,21 @@ class QuantilePPO(OnPolicyAlgorithm):
                 entropy_loss = -entropy.mean()
 
                 loss = pg_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
+                if self.logger is not None:
+                    self.logger.record("train/quantile_loss", value_loss.item())
+
+                    # Log quantile distribution statistics
+                    quantile_mean = quantiles.mean().item()
+                    quantile_std = quantiles.std().item()
+                    quantile_min = quantiles.min().item()
+                    quantile_max = quantiles.max().item()
+
+                    self.logger.record("train/quantile_mean", quantile_mean)
+                    self.logger.record("train/quantile_std", quantile_std)
+                    self.logger.record("train/quantile_min", quantile_min)
+                    self.logger.record("train/quantile_max", quantile_max)
+
                 self.policy.optimizer.zero_grad()
                 loss.backward()
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
