@@ -3,6 +3,7 @@ import numpy as np
 import gym
 import matplotlib.pyplot as plt
 
+
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
@@ -13,13 +14,23 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback
 
 
-def make_env(env_id: str, rank: int, seed: int = 0):
+def make_env(env_id, rank, seed=0):
     def _init():
         env = gym.make(env_id)
-        env.seed(seed + rank)
-        env = Monitor(env)  # <- THIS enables 'episode' info for the callback
+        # New API (Gym >= 0.26 / Gymnasium)
+        try:
+            env.reset(seed=seed + rank)
+            if hasattr(env.action_space, "seed"):
+                env.action_space.seed(seed + rank)
+            if hasattr(env.observation_space, "seed"):
+                env.observation_space.seed(seed + rank)
+        except TypeError:
+            # Old Gym API
+            if hasattr(env, "seed"):
+                env.seed(seed + rank)
+            if hasattr(env.action_space, "seed"):
+                env.action_space.seed(seed + rank)
         return env
-    set_random_seed(seed)
     return _init
 
 #add simple reward callback based on existing sb3 reward callbacks
