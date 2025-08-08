@@ -1,6 +1,5 @@
 import torch as th
 from torch import nn
-from torch.nn import functional as F
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from gym import spaces
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
@@ -47,27 +46,35 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             use_sde=use_sde,
             log_std_init=log_std_init,
             full_std=full_std,
-            sde_net_arch=sde_net_arch,
             use_expln=use_expln,
             squash_output=squash_output,
             normalize_images=normalize_images,
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
-            _init_setup_model=_init_setup_model,
         )
         self.n_quantiles = n_quantiles
         # Remove scalar value network
         self.value_net = None
         # Quantile head and quantile loss
         self.quantile_head = QuantileHead(
-            input_dim=self.mlp_extractor.latent_dim,
+            input_dim=self.mlp_extractor.latent_dim_vf,
             output_dim=1,
             n_quantiles=self.n_quantiles,
             n_basis=64,
-            hidden_dim=self.mlp_extractor.latent_dim,
+            hidden_dim=self.mlp_extractor.latent_dim_vf,
             device=self.device,
         )
         self.quantile_loss = QuantileLoss()
+
+    def predict_values(self, obs: th.Tensor) -> th.Tensor:
+        features = self.extract_features(obs)
+        _, latent_vf = self.mlp_extractor(features)
+        B = latent_vf.shape[0]
+        taus = th.linspace(1e-3, 1 - 1e-3, self.quantile_head.n_quantiles, device=latent_vf.device)
+        taus = taus.view(1, -1, 1).expand(B, -1, -1)
+        q = self.quantile_head(latent_vf, tau=taus)  # [B, N, 1]
+        v = q.mean(dim=-2).squeeze(-1)  # [B]
+        return v.unsqueeze(-1)  # [B, 1]
 
     def forward(self, obs: th.Tensor, deterministic: bool = False):
         features = self.extract_features(obs)
@@ -166,6 +173,7 @@ class QuantilePPO(OnPolicyAlgorithm):
         self.n_epochs = n_epochs
         self.clip_range = clip_range
         self.clip_range_vf = clip_range_vf
+        self.discrete = isinstance(self.action_space, spaces.Discrete)
 
         self.rollout_buffer = RolloutBuffer(
             buffer_size=self.n_steps,

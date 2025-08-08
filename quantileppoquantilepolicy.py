@@ -1,8 +1,10 @@
 import os
 import numpy as np
-import gym
 import matplotlib.pyplot as plt
 
+if not hasattr(np, "bool8"):
+    np.bool8 = np.bool_
+import gym
 
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
