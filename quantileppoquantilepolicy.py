@@ -97,7 +97,7 @@ if __name__ == '__main__':
         max_grad_norm=0.5,
         clip_range=0.2,
         clip_range_vf=None,
-        seed=0,
+        seed=1234,
     )
 
     reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
