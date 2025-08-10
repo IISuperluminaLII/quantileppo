@@ -1,11 +1,13 @@
 import torch as th
 from torch import nn
+import numpy as np
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from gym import spaces
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
+from stable_baselines3.common.utils import FloatSchedule
 
 from utilities import QuantileHead
 from utilities import QuantileDistribution
@@ -171,8 +173,7 @@ class QuantilePPO(OnPolicyAlgorithm):
         self.n_quantiles = n_quantiles
         self.batch_size = batch_size
         self.n_epochs = n_epochs
-        self.clip_range = clip_range
-        self.clip_range_vf = clip_range_vf
+        self.clip_range = FloatSchedule(clip_range) #callable float smh
         self.discrete = isinstance(self.action_space, spaces.Discrete)
 
         self.rollout_buffer = RolloutBuffer(
@@ -191,7 +192,7 @@ class QuantilePPO(OnPolicyAlgorithm):
     def train(self) -> None:
         self._update_learning_rate(self.policy.optimizer)
         clip_range = self.clip_range(self._current_progress_remaining)
-        clip_range_vf = self.clip_range_vf(self._current_progress_remaining) if self.clip_range_vf else None
+        # clip_range_vf = self.clip_range_vf(self._current_progress_remaining) if self.clip_range_vf else None
 
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
@@ -230,6 +231,12 @@ class QuantilePPO(OnPolicyAlgorithm):
                     self.logger.record("train/quantile_std", quantile_std)
                     self.logger.record("train/quantile_min", quantile_min)
                     self.logger.record("train/quantile_max", quantile_max)
+
+                    if len(self.ep_info_buffer) > 0:
+                        ep_rew_mean = float(np.mean([ep["r"] for ep in self.ep_info_buffer]))
+                        ep_len_mean = float(np.mean([ep["l"] for ep in self.ep_info_buffer]))
+                        self.logger.record("rollout/ep_rew_mean", ep_rew_mean)
+                        self.logger.record("rollout/ep_len_mean", ep_len_mean)
 
                 self.policy.optimizer.zero_grad()
                 loss.backward()

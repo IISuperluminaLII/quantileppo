@@ -6,7 +6,7 @@ if not hasattr(np, "bool8"):
     np.bool8 = np.bool_
 import gym
 
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.utils import set_random_seed
 
 # Import your custom QuantilePPO and its policy
@@ -61,7 +61,7 @@ class RewardPlotCallback(BaseCallback):
                 self.ep_timesteps.append(self.num_timesteps)
 
                 if self.plot_every and (len(self.ep_rewards) % self.plot_every == 0):
-                    self.plot(save_path=os.path.join(self.save_dir, f"reward_curve_{len(self.ep_rewards)}.png"))
+                    self.plot(save_path=os.path.join(self.save_dir, f"reward_curve2_{len(self.ep_rewards)}.png"))
         return True
 
     def plot(self, save_path: str | None = None, show: bool = False):
@@ -94,7 +94,16 @@ class RewardPlotCallback(BaseCallback):
 if __name__ == '__main__':
     env_id = "CartPole-v1"
     num_cpu = 4
-    env = SubprocVecEnv([make_env(env_id, i, 1234) for i in range(num_cpu)])
+
+    from stable_baselines3.common.env_util import make_vec_env
+    env = make_vec_env(
+        "CartPole-v1",
+        n_envs=4,
+        seed=1234,
+        # env_kwargs={"render_mode": "human"},  # <-- important
+        vec_env_cls=SubprocVecEnv,
+    )
+    env = VecMonitor(env)
 
     model = QuantilePPO(
         policy=QuantileActorCriticPolicy,
@@ -114,7 +123,7 @@ if __name__ == '__main__':
     )
 
     reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
-    model.learn(total_timesteps=25_000, callback=reward_cb)
+    model.learn(total_timesteps=250_000, callback=reward_cb)
 
     # Save a final plot
     reward_cb.plot(save_path="plots/reward_curve.png")
