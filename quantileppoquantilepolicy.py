@@ -111,19 +111,18 @@ if __name__ == '__main__':
         n_quantiles=32,
         verbose=1,
         learning_rate=3e-4,
-        n_steps=2048,
+        n_steps=512,
         batch_size=64,
-        n_epochs=10,
-        ent_coef=0.0,
+        n_epochs=5,
+        ent_coef=0.01,
         vf_coef=0.5,
         max_grad_norm=0.5,
         clip_range=0.2,
-        clip_range_vf=None,
         seed=1234,
     )
 
     reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
-    model.learn(total_timesteps=250_000, callback=reward_cb)
+    model.learn(total_timesteps=100_000, callback=reward_cb)
 
     # Save a final plot
     reward_cb.plot(save_path="plots/reward_curve.png")
