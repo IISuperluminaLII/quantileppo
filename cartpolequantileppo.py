@@ -129,7 +129,7 @@ if __name__ == "__main__":
     seed = 1234
 
     def make_env():
-        env = gym.make(env_id, render_mode="human")
+        env = gym.make(env_id)
         try:
             env.reset(seed=seed)
             if hasattr(env.action_space, "seed"):
@@ -148,18 +148,18 @@ if __name__ == "__main__":
     model = QuantilePPO(
         policy=QuantileActorCriticPolicy,
         env=train_env,
-        n_quantiles=16,
+        n_quantiles=32,
         verbose=1,
         learning_rate=3e-4,
-        n_steps=2048,
+        n_steps=512,
         batch_size=64,
-        n_epochs=10,
-        ent_coef=0.00,
+        n_epochs=5,
+        ent_coef=0.01,
         vf_coef=0.5,
         max_grad_norm=0.5,
         clip_range=0.2,
         seed=seed,
-        gae_lambda=1.0,
+        gae_lambda=0.95,
     )
 
     reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
