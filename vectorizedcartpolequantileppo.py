@@ -126,7 +126,7 @@ if __name__ == '__main__':
     model.learn(total_timesteps=100_000, callback=reward_cb)
 
     # Save a final plot
-    reward_cb.plot(save_path="plots/reward_curve.png")
+    reward_cb.plot(save_path="plots/reward_curve_randomtau1.png")
 
     # (optional) quick eval loop (render may be a no-op on VecEnvs)
     obs = env.reset()
