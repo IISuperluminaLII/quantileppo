@@ -54,6 +54,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
         )
+
         self.n_quantiles = n_quantiles
         # Remove scalar value network
         self.value_net = None
@@ -64,7 +65,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             n_quantiles=self.n_quantiles,
             n_basis=64,
             hidden_dim=self.mlp_extractor.latent_dim_vf,
-            device=self.device,
+            device="cuda",
         )
         self.quantile_loss = QuantileLoss()
 

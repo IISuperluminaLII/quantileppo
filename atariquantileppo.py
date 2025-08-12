@@ -1,14 +1,20 @@
-import gym
-import numpy as np
 import os
+import numpy as np
+import gym
+
+# SB3 Atari helpers (work with classic gym Atari "NoFrameskip-v4")
+from stable_baselines3.common.atari_wrappers import AtariWrapper
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import BaseCallback
+
+# Your impl
+from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPolicy
+
+# matplotlib only needed for the callback's plot method
 import matplotlib.pyplot as plt
 
 if not hasattr(np, "bool8"):
     np.bool8 = np.bool_
-
-from stable_baselines3.common.utils import set_random_seed
-from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPolicy
-from stable_baselines3.common.callbacks import BaseCallback
 
 
 class SimpleMonitor(gym.Env):
@@ -16,7 +22,6 @@ class SimpleMonitor(gym.Env):
         self.env = env
         self.ep_ret = 0.0
         self.ep_len = 0
-        self._needs_reset = True
 
     @property
     def observation_space(self):
@@ -26,18 +31,9 @@ class SimpleMonitor(gym.Env):
     def action_space(self):
         return self.env.action_space
 
-    @property
-    def reward_range(self):
-        return getattr(self.env, "reward_range", (-float("inf"), float("inf")))
-
-    @property
-    def spec(self):
-        return getattr(self.env, "spec", None)
-
     def reset(self, **kwargs):
         self.ep_ret = 0.0
         self.ep_len = 0
-        self._needs_reset = False
         out = self.env.reset(**kwargs)
         if isinstance(out, tuple) and len(out) == 2:
             obs, info = out
@@ -56,7 +52,6 @@ class SimpleMonitor(gym.Env):
         if done:
             info = dict(info)
             info["episode"] = {"r": self.ep_ret, "l": self.ep_len}
-            self._needs_reset = True
         return obs, reward, done, info
 
     def render(self, *args, **kwargs):
@@ -64,14 +59,6 @@ class SimpleMonitor(gym.Env):
 
     def close(self):
         return self.env.close()
-
-    def seed(self, seed=None):
-        if hasattr(self.env, "seed"):
-            return self.env.seed(seed)
-        # gymnasium-style
-        if hasattr(self.env, "reset"):
-            return self.env.reset(seed=seed)
-        return None
 
 
 class RewardPlotCallback(BaseCallback):
@@ -124,65 +111,69 @@ class RewardPlotCallback(BaseCallback):
         plt.close()
 
 
+def make_atari_env(env_id="PongNoFrameskip-v4", seed=1234):
+    # Base env
+    env = gym.make(env_id, frameskip=1)  # NoFrameskip variant
+    env.reset(seed=seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    # Apply DeepMind-style preprocessing
+    env = AtariWrapper(env, noop_max=30, frame_skip=4, screen_size=84, terminal_on_life_loss=True, clip_reward=True)
+
+    # Vectorize for SB3 compatibility (even if only 1 env)
+    env = DummyVecEnv([lambda: env])
+    return env
+
+
 if __name__ == "__main__":
-    env_id = "CartPole-v1"
+    # === Choose your Atari game ===
+    # Common choices: "PongNoFrameskip-v4", "BreakoutNoFrameskip-v4", "SpaceInvadersNoFrameskip-v4"
+    env_id = "PongNoFrameskip-v4"
     seed = 1234
 
-    def make_env():
-        env = gym.make(env_id)
-        try:
-            env.reset(seed=seed)
-            if hasattr(env.action_space, "seed"):
-                env.action_space.seed(seed)
-            if hasattr(env.observation_space, "seed"):
-                env.observation_space.seed(seed)
-        except TypeError:
-            if hasattr(env, "seed"):
-                env.seed(seed)
-            if hasattr(env.action_space, "seed"):
-                env.action_space.seed(seed)
-        return env
+    train_env = make_atari_env(env_id=env_id, seed=seed)
 
-    def get_incremented_path(path):
-        base, ext = os.path.splitext(path)
-        counter = 1
-        new_path = path
-        while os.path.exists(new_path):
-            new_path = f"{base}_{counter}{ext}"
-            counter += 1
-        return new_path
-
-    train_env = SimpleMonitor(make_env())
-
+    # ===== Atari-tuned hyperparameters for QuantilePPO on pixels =====
+    # Notes:
+    # - Learning rate & clip adjusted for stability on high-dim obs
+    # - n_steps small (128–256) for on-policy variance control without vec env
+    # - batch_size large enough to use multiple epochs (3–4) without overfitting
+    # - ent_coef >0 encourages exploration on sparse-reward games
+    # - more quantiles for pixel tasks (32 or 64). Start with 32.
     model = QuantilePPO(
         policy=QuantileActorCriticPolicy,
         env=train_env,
         n_quantiles=32,
         verbose=1,
-        learning_rate=3e-4,
-        n_steps=512,
-        batch_size=64,
-        n_epochs=5,
-        ent_coef=0.01,
-        vf_coef=0.5,
+
+        # Optim & rollout
+        learning_rate=2.5e-4,      # linear-ish good default for Atari
+        n_steps=256,               # 128–256 works; increase if you vectorize envs
+        batch_size=512,            # must be divisible by n_steps * (#envs); here single env so any power of 2 is fine
+        n_epochs=3,                # 3–4 for PPO on Atari
         max_grad_norm=0.5,
-        clip_range=0.2,
+
+        # PPO loss mix
+        clip_range=0.1,            # tighter clip generally steadier on pixels
+        gae_lambda=0.95,           # standard Atari setting
+        vf_coef=0.5,
+        ent_coef=0.01,             # encourage exploration; try 0.005–0.02 per game
+
         seed=seed,
-        gae_lambda=0.95,
-        device="cuda",
     )
 
-    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
-    model.learn(total_timesteps=5_000_000, callback=reward_cb)
+    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=20, verbose=1)
 
-    # Usage
-    save_path = get_incremented_path("plots/reward_curve_randomtau2.png")
-    reward_cb.plot(save_path=save_path)
+    # Atari is slow; real runs are 5–10M+ timesteps. Start smaller to verify learning curve.
+    model.learn(total_timesteps=2_000_000, callback=reward_cb)
+    reward_cb.plot(save_path=f"plots/reward_curve_{env_id}.png")
 
+    # Quick greedy run
     obs = train_env.reset()
-    for _ in range(1_000):
-        action, _states = model.predict(obs)
+    for _ in range(10_000):
+        action, _states = model.predict(obs, deterministic=True)
         obs, rewards, done, info = train_env.step(action)
-        train_env.render()
+        # train_env.render()  # enable if you really want to watch; slows a lot
         if done:
             obs = train_env.reset()
