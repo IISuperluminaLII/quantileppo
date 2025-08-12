@@ -73,9 +73,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         features = self.extract_features(obs)
         _, latent_vf = self.mlp_extractor(features)
         B = latent_vf.shape[0]
-        batch_size = obs.size(0)
-        taus = th.rand(batch_size, self.quantile_head.n_quantiles, device=latent_vf.device)
-        taus = taus.view(1, -1, 1).expand(B, -1, -1)
+        taus = th.rand(B, self.quantile_head.n_quantiles, 1, device=latent_vf.device)
         q = self.quantile_head(latent_vf, tau=taus)  # [B, N, 1]
         v = q.mean(dim=-2).squeeze(-1)  # [B]
         return v.unsqueeze(-1)  # [B, 1]
