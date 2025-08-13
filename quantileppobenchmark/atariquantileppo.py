@@ -16,7 +16,7 @@ import gymnasium  # do not alias as 'gym' to avoid conflicts
 import ale_py  # required so ALE Atari envs register with Gymnasium
 
 from gymnasium.wrappers import AtariPreprocessing, TransformObservation
-from gymnasium.wrappers import AtariPreprocessing
+from gymnasium.wrappers import AtariPreprocessing, RecordVideo
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecMonitor, SubprocVecEnv
 
 if not hasattr(np, "bool8"):
@@ -183,7 +183,11 @@ def make_atari_env(env_id="ALE/Pong-v5", seed=1234, n_stack=4, scale_obs=True):
     or 3*n_stack (color). No VecTransposeImage is used.
     """
     def _make():
-        env = gym.make(env_id, frameskip=1)  # disable frame-skip here
+        env = gym.make(env_id, frameskip=1, render_mode="human")  # disable frame-skip here
+
+        # Record every episode — you can change lambda e: e % 10 == 0 to record only some
+        # env = RecordVideo(env, video_folder="videos/", episode_trigger=lambda e: e % 1000 == 0)
+
         env = AtariPreprocessing(env,noop_max=30, frame_skip=4, screen_size=84,
                                  grayscale_obs=True, terminal_on_life_loss=True, scale_obs=False)
 
