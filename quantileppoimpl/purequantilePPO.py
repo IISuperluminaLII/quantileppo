@@ -65,7 +65,7 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
             n_quantiles=self.n_quantiles,
             n_basis=64,
             hidden_dim=self.mlp_extractor.latent_dim_vf,
-            device="cuda",
+            device=self.device,
         )
         self.quantile_loss = QuantileLoss()
 
