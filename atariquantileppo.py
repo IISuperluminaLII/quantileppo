@@ -17,7 +17,7 @@ import ale_py  # required so ALE Atari envs register with Gymnasium
 
 from gymnasium.wrappers import AtariPreprocessing, TransformObservation
 from gymnasium.wrappers import AtariPreprocessing
-from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
+from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecMonitor
 
 if not hasattr(np, "bool8"):
     np.bool8 = np.bool_
@@ -133,13 +133,14 @@ def make_atari_env(env_id="ALE/Pong-v5", seed=1234, n_stack=4, scale_obs=True):
     or 3*n_stack (color). No VecTransposeImage is used.
     """
     def _make():
-        env = gym.make(env_id, frameskip=1, render_mode="human")  # disable frame-skip here
+        env = gym.make(env_id, frameskip=1)  # disable frame-skip here
         env = AtariPreprocessing(env, noop_max=30, frame_skip=4, screen_size=84,
                                  grayscale_obs=True, terminal_on_life_loss=True, scale_obs=False)
         return env
 
     vec = DummyVecEnv([_make])
     vec = VecFrameStack(vec, n_stack=n_stack)  # stacks along channel dimension
+    vec = VecMonitor(vec)
     return vec
 
 
