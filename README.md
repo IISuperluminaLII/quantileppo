@@ -2,6 +2,10 @@
 
 WIP WIP WIP WIP WIP WIP
 
+simple for now just run
+
+ python -m quantileppobenchmark.atariquantileppo
+
 This repository implements **Quantile Regression**-based reinforcement learning heads and distribution classes, integrated into PPO and World Model architectures.  
 It follows the ideas from Dabney et al. for **Distributional RL** and adapts them to continuous and discrete control via PPO.
 
