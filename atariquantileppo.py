@@ -2,9 +2,9 @@ import os
 import numpy as np
 import gym
 
-# SB3 Atari helpers (work with classic gym Atari "NoFrameskip-v4")
-from stable_baselines3.common.atari_wrappers import AtariWrapper
-from stable_baselines3.common.vec_env import DummyVecEnv
+import gymnasium as gym
+import ale_py  # ensures firing up ROM registration
+from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.callbacks import BaseCallback
 
 # Your impl
@@ -12,6 +12,12 @@ from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPoli
 
 # matplotlib only needed for the callback's plot method
 import matplotlib.pyplot as plt
+import gymnasium  # do not alias as 'gym' to avoid conflicts
+import ale_py  # required so ALE Atari envs register with Gymnasium
+
+from gymnasium.wrappers import AtariPreprocessing, TransformObservation
+from gymnasium.wrappers import AtariPreprocessing
+from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
 
 if not hasattr(np, "bool8"):
     np.bool8 = np.bool_
@@ -110,20 +116,31 @@ class RewardPlotCallback(BaseCallback):
             plt.show()
         plt.close()
 
+def _to_ale_id(env_id: str) -> str:
+    # minimal mapping for common old Gym IDs
+    mapping = {
+        "PongNoFrameskip-v4": "ALE/Pong-v5",
+        "BreakoutNoFrameskip-v4": "ALE/Breakout-v5",
+        "SpaceInvadersNoFrameskip-v4": "ALE/SpaceInvaders-v5",
+    }
+    return mapping.get(env_id, env_id)
 
-def make_atari_env(env_id="PongNoFrameskip-v4", seed=1234):
-    # Base env
-    env = gym.make(env_id, frameskip=1)  # NoFrameskip variant
-    env.reset(seed=seed)
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
 
-    # Apply DeepMind-style preprocessing
-    env = AtariWrapper(env, noop_max=30, frame_skip=4, screen_size=84, terminal_on_life_loss=True, clip_reward=True)
+def make_atari_env(env_id="ALE/Pong-v5", seed=1234, n_stack=4, scale_obs=True):
+    env_id = _to_ale_id(env_id)
+    """
+    Returns a DummyVecEnv whose observation space is (H, W, C) with C = n_stack (grayscale)
+    or 3*n_stack (color). No VecTransposeImage is used.
+    """
+    def _make():
+        env = gym.make(env_id, frameskip=1, render_mode="human")  # disable frame-skip here
+        env = AtariPreprocessing(env, noop_max=30, frame_skip=4, screen_size=84,
+                                 grayscale_obs=True, terminal_on_life_loss=True, scale_obs=False)
+        return env
 
-    # Vectorize for SB3 compatibility (even if only 1 env)
-    env = DummyVecEnv([lambda: env])
-    return env
+    vec = DummyVecEnv([_make])
+    vec = VecFrameStack(vec, n_stack=n_stack)  # stacks along channel dimension
+    return vec
 
 
 if __name__ == "__main__":
@@ -161,6 +178,7 @@ if __name__ == "__main__":
         ent_coef=0.01,             # encourage exploration; try 0.005–0.02 per game
 
         seed=seed,
+        device="cuda",
     )
 
     reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=20, verbose=1)
