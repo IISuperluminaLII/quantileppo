@@ -235,7 +235,7 @@ if __name__ == "__main__":
         device="cuda",
     )
 
-    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=20, verbose=1)
+    reward_cb = RewardPlotCallback(save_dir="../plots", plot_every=None, rolling=20, verbose=1)
 
     # Atari is slow; real runs are 5–10M+ timesteps. Start smaller to verify learning curve.
     model.learn(total_timesteps=2_000_000, callback=reward_cb)

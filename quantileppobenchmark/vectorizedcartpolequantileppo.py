@@ -122,7 +122,7 @@ if __name__ == '__main__':
         gae_lambda=0.95,
     )
 
-    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
+    reward_cb = RewardPlotCallback(save_dir="../plots", plot_every=None, rolling=10, verbose=1)
     model.learn(total_timesteps=100_000, callback=reward_cb)
 
     # Save a final plot

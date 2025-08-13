@@ -172,11 +172,11 @@ if __name__ == "__main__":
         device="cuda",
     )
 
-    reward_cb = RewardPlotCallback(save_dir="plots", plot_every=None, rolling=10, verbose=1)
+    reward_cb = RewardPlotCallback(save_dir="../plots", plot_every=None, rolling=10, verbose=1)
     model.learn(total_timesteps=5_000_000, callback=reward_cb)
 
     # Usage
-    save_path = get_incremented_path("plots/reward_curve_randomtau2.png")
+    save_path = get_incremented_path("../plots/reward_curve_randomtau2.png")
     reward_cb.plot(save_path=save_path)
 
     obs = train_env.reset()
