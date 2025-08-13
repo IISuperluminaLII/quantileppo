@@ -1,4 +1,4 @@
-# QuantilePPO
+# QuantilePPO & World Model Experiments
 
 This repository implements **Quantile Regression**-based reinforcement learning heads and distribution classes, integrated into PPO and World Model architectures.  
 It follows the ideas from Dabney et al. for **Distributional RL** and adapts them to continuous and discrete control via PPO.
@@ -28,7 +28,77 @@ Clone the repo and run:
 ```bash
 bash setup_env.sh
 ```
-Windows
-```ps1
+
+**Windows PowerShell**
+```powershell
 .\setup_env.ps1
 ```
+
+The script:
+1. Creates a `.venv/` virtual environment if it doesn’t exist.
+2. Upgrades `pip`, `setuptools`, and `wheel`.
+3. Installs dependencies from `requirements.txt`.
+4. Prints the correct activation command for your OS.
+
+---
+
+## ▶ Activating the Environment
+
+After setup, activate the venv:
+
+**Linux/macOS**
+```bash
+source .venv/bin/activate
+```
+
+**Windows PowerShell**
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Deactivate anytime with:
+```bash
+deactivate
+```
+
+---
+
+## 🎮 Atari ROM Setup (AutoROM)
+
+If you plan to train Atari environments, install ROMs using:
+```bash
+AutoROM --accept-license
+```
+This is required for environments like `PongNoFrameskip-v4`.
+
+---
+
+## 🚀 Training Examples
+
+### Atari Pong with QuantilePPO
+```bash
+python atariquantileppo.py --env PongNoFrameskip-v4 --timesteps 1_000_000
+```
+
+### World Model Example
+```bash
+python quantileworldmodelexample.py
+```
+
+---
+
+## 📂 Project Structure
+
+```
+quantile_head.py          # Quantile regression head (IQN-style embedding)
+quantile_distribution.py  # Distribution wrapper over quantile outputs
+quantile_loss.py          # Quantile regression loss
+quantileworldmodelexample.py  # Transformer-based ensemble world model using quantile heads
+requirements.txt          # All dependencies
+setup_env.sh / setup_env.ps1 / bootstrap_env.py  # Environment bootstrap scripts
+```
+
+---
+
+## 📜 License
+MIT (or specify your license here).
