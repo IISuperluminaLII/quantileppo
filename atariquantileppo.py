@@ -17,7 +17,7 @@ import ale_py  # required so ALE Atari envs register with Gymnasium
 
 from gymnasium.wrappers import AtariPreprocessing, TransformObservation
 from gymnasium.wrappers import AtariPreprocessing
-from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecMonitor, SubprocVecEnv
 
 if not hasattr(np, "bool8"):
     np.bool8 = np.bool_
@@ -65,6 +65,56 @@ class SimpleMonitor(gym.Env):
 
     def close(self):
         return self.env.close()
+
+class PongScoreWrapper(gym.Wrapper):
+    """
+    Tracks the true Pong scoreboard and writes into info:
+      info["score_agent"], info["score_opponent"]
+    Compatible with Gym (4-tuple) and Gymnasium (5-tuple).
+    """
+    def __init__(self, env):
+        super().__init__(env)
+        self.agent_score = 0
+        self.opp_score = 0
+
+    def reset(self, **kwargs):
+        self.agent_score = 0
+        self.opp_score = 0
+        out = self.env.reset(**kwargs)
+        # If Gymnasium reset returns (obs, info), pass through and seed info with scores
+        if isinstance(out, tuple) and len(out) == 2:
+            obs, info = out
+            info = dict(info)
+            info["score_agent"] = 0
+            info["score_opponent"] = 0
+            return obs, info
+        return out  # classic Gym returns just obs
+
+    def step(self, action):
+        out = self.env.step(action)
+
+        def _update(reward, info):
+            if reward != 0:
+                pts = int(round(abs(float(reward))))
+                if reward > 0:
+                    self.agent_score += pts
+                else:
+                    self.opp_score += pts
+            info = dict(info)
+            info["score_agent"] = self.agent_score
+            info["score_opponent"] = self.opp_score
+            return info
+
+        # Gymnasium: 5-tuple
+        if isinstance(out, tuple) and len(out) == 5:
+            obs, reward, terminated, truncated, info = out
+            info = _update(reward, info)
+            return obs, reward, terminated, truncated, info
+
+        # Classic Gym: 4-tuple
+        obs, reward, done, info = out
+        info = _update(reward, info)
+        return obs, reward, done, info
 
 
 class RewardPlotCallback(BaseCallback):
@@ -134,13 +184,16 @@ def make_atari_env(env_id="ALE/Pong-v5", seed=1234, n_stack=4, scale_obs=True):
     """
     def _make():
         env = gym.make(env_id, frameskip=1)  # disable frame-skip here
-        env = AtariPreprocessing(env, noop_max=30, frame_skip=4, screen_size=84,
+        env = AtariPreprocessing(env,noop_max=30, frame_skip=4, screen_size=84,
                                  grayscale_obs=True, terminal_on_life_loss=True, scale_obs=False)
+
+        # Insert scoreboard writer so info has keys for VecMonitor. SB3 is stable, but man is it shyte
+        env = PongScoreWrapper(env)
         return env
 
     vec = DummyVecEnv([_make])
     vec = VecFrameStack(vec, n_stack=n_stack)  # stacks along channel dimension
-    vec = VecMonitor(vec)
+    vec = VecMonitor(vec, info_keywords=("score_agent", "score_opponent"))
     return vec
 
 
@@ -168,7 +221,7 @@ if __name__ == "__main__":
         # Optim & rollout
         learning_rate=2.5e-4,      # linear-ish good default for Atari
         n_steps=256,               # 128–256 works; increase if you vectorize envs
-        batch_size=512,            # must be divisible by n_steps * (#envs); here single env so any power of 2 is fine
+        batch_size=256,            # must be divisible by n_steps * (#envs); here single env so any power of 2 is fine
         n_epochs=3,                # 3–4 for PPO on Atari
         max_grad_norm=0.5,
 

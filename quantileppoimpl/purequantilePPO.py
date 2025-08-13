@@ -235,6 +235,17 @@ class QuantilePPO(OnPolicyAlgorithm):
                     if len(self.ep_info_buffer) > 0:
                         ep_rew_mean = float(np.mean([ep["r"] for ep in self.ep_info_buffer]))
                         ep_len_mean = float(np.mean([ep["l"] for ep in self.ep_info_buffer]))
+
+                        # Extract scoreboard if present
+                        agent_scores = [ep.get("score_agent") for ep in self.ep_info_buffer if "score_agent" in ep]
+                        opp_scores = [ep.get("score_opponent") for ep in self.ep_info_buffer if "score_opponent" in ep]
+
+                        if len(agent_scores) > 0 and len(opp_scores) > 0:
+                            agent_score_mean = float(np.mean(agent_scores))
+                            opp_score_mean = float(np.mean(opp_scores))
+                            self.logger.record("scoreboard/ep_score_agent", agent_score_mean)
+                            self.logger.record("scoreboard/ep_score_opponent", opp_score_mean)
+
                         self.logger.record("rollout/ep_rew_mean", ep_rew_mean)
                         self.logger.record("rollout/ep_len_mean", ep_len_mean)
 
