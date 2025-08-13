@@ -200,6 +200,14 @@ class QuantilePPO(OnPolicyAlgorithm):
                 values, log_prob, entropy, quantiles, taus, q_dist = self.policy.evaluate_actions(
                     rollout_data.observations, rollout_data.actions.long() if self.discrete else rollout_data.actions,)
 
+                with th.no_grad():
+                    # log_prob of the old policy is already in rollout_data.old_log_prob
+                    kl_div = rollout_data.old_log_prob - log_prob
+                    kl_div = kl_div.mean()
+
+                if self.logger is not None:
+                    self.logger.record("train/kl_divergence", kl_div.item())
+
                 # Policy gradient loss
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
                 adv = rollout_data.advantages
