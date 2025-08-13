@@ -1,4 +1,4 @@
-# QuantilePPO & World Model Experiments
+# QuantilePPO
 
 This repository implements **Quantile Regression**-based reinforcement learning heads and distribution classes, integrated into PPO and World Model architectures.  
 It follows the ideas from Dabney et al. for **Distributional RL** and adapts them to continuous and discrete control via PPO.
@@ -80,11 +80,6 @@ This is required for environments like `PongNoFrameskip-v4`.
 python atariquantileppo.py --env PongNoFrameskip-v4 --timesteps 1_000_000
 ```
 
-### World Model Example
-```bash
-python quantileworldmodelexample.py
-```
-
 ---
 
 ## 📂 Project Structure
@@ -100,5 +95,3 @@ setup_env.sh / setup_env.ps1 / bootstrap_env.py  # Environment bootstrap scripts
 
 ---
 
-## 📜 License
-MIT (or specify your license here).
