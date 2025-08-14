@@ -8,7 +8,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.callbacks import BaseCallback
 
 # Your impl
-from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPolicy
+from quantileppoimpl.purequantilePPO import QuantilePPO, QuantileActorCriticPolicy, QuantileActorCriticCnnPolicy
 
 # matplotlib only needed for the callback's plot method
 import matplotlib.pyplot as plt
@@ -217,7 +217,7 @@ if __name__ == "__main__":
     # - ent_coef >0 encourages exploration on sparse-reward games
     # - more quantiles for pixel tasks (32 or 64). Start with 32.
     model = QuantilePPO(
-        policy=QuantileActorCriticPolicy,
+        policy=QuantileActorCriticCnnPolicy,
         env=train_env,
         n_quantiles=32,
         verbose=1,

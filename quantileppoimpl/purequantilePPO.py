@@ -1,13 +1,15 @@
 import torch as th
 from torch import nn
 import numpy as np
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union, Tuple
 from gym import spaces
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv
 from stable_baselines3.common.utils import FloatSchedule
+from stable_baselines3.common.type_aliases import Schedule
+from stable_baselines3.common.torch_layers import NatureCNN
 
 from utilities import QuantileHead
 from utilities import QuantileDistribution
@@ -118,13 +120,153 @@ class QuantileActorCriticPolicy(ActorCriticPolicy):
         return values, log_prob, entropy, quantiles, taus, q_dist
 
 
+class QuantileActorCriticCnnPolicy(ActorCriticPolicy):
+    """
+    Actor-Critic policy with a CNN feature extractor (NatureCNN) and a distributional
+    critic using quantile regression (QR/IQN-style head).
+
+    - Actor: standard categorical (discrete) or Gaussian (continuous) policy.
+    - Critic: QuantileHead produces n_quantiles; we also expose the mean value
+              for PPO while keeping quantiles for a QR loss.
+    """
+
+    def __init__(
+        self,
+        observation_space,
+        action_space,
+        lr_schedule: Schedule,
+        n_quantiles: int = 32,
+        quantile_hidden_dim: int = 256,
+        quantile_n_basis: int = 64,
+        **kwargs: Any,
+    ):
+        super().__init__(
+            observation_space=observation_space,
+            action_space=action_space,
+            lr_schedule=lr_schedule,
+            features_extractor_class=NatureCNN,  # <-- CNN torso here
+            features_extractor_kwargs=dict(features_dim=512),  # NatureCNN default head size
+            **kwargs,
+        )
+        self.n_quantiles = n_quantiles
+        self.quantile_hidden_dim = quantile_hidden_dim
+        self.quantile_n_basis = quantile_n_basis
+
+        # SB3 builds the feature extractor in parent __init__. We now build heads.
+        self._build_heads()
+
+        # Optimizer (reuse SB3 helper to gather parameters)
+        self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1))
+
+    # We skip SB3's default MLP extractor: CNN -> heads directly
+    def _build_mlp_extractor(self) -> None:  # type: ignore[override]
+        # SB3 expects this method; we just provide a no-op module.
+        self.mlp_extractor = nn.Identity()
+
+    def _build_heads(self) -> None:
+        features_dim = self.features_extractor.features_dim
+
+        # Policy head (same as SB3 default)
+        self.action_net = nn.Linear(features_dim, self.action_space.n) if self.is_discrete \
+            else nn.Linear(features_dim, self.action_dist.proba_distribution_net_shape()[0])
+
+        # Distributional critic: quantile head over features
+        self.quantile_head = QuantileHead(
+            input_dim=features_dim,
+            output_dim=1,
+            n_quantiles=self.n_quantiles,
+            n_basis=self.quantile_n_basis,
+            hidden_dim=self.quantile_hidden_dim,
+            device=self.device,
+        )
+
+        # A dummy value head so SB3 methods that call .value_net exist — not used for computation
+        self.value_net = nn.Linear(features_dim, 1)
+        # We won't use value_net in forward; it can remain uninitialized or be frozen
+        for p in self.value_net.parameters():
+            p.requires_grad = False
+
+        # Small init for actor logits (optional nicety)
+        nn.init.orthogonal_(self.action_net.weight, gain=0.01)
+        nn.init.constant_(self.action_net.bias, 0.0)
+
+    # ---- Forward paths --------------------------------------------------------
+
+    def _get_features(self, obs: th.Tensor) -> th.Tensor:
+        # CNN torso
+        return self.extract_features(obs)
+
+    def _predict_quantiles(
+        self, features: th.Tensor, tau: Optional[th.Tensor] = None
+    ) -> th.Tensor:
+        """
+        Returns quantile values with shape [batch, n_quantiles, 1]
+        """
+        return self.quantile_head(features, tau=tau)
+
+    def forward(  # used by collect_rollouts
+        self,
+        obs: th.Tensor,
+        deterministic: bool = False,
+    ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+        """
+        Returns action, value_mean, log_prob
+        SB3 PPO expects a scalar value estimate; we return the mean of quantiles here.
+        """
+        features = self._get_features(obs)
+        logits = self.action_net(features)
+
+        distribution = self._get_action_dist_from_latent(logits)
+        actions = distribution.get_actions(deterministic=deterministic)
+        log_prob = distribution.log_prob(actions)
+
+        # Critic: mean over quantiles for PPO's value target
+        quantiles = self._predict_quantiles(features, tau=None)         # [B, Q, 1]
+        value_mean = quantiles.mean(dim=1).squeeze(-1)                  # [B]
+
+        return actions, value_mean, log_prob
+
+    def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        actions, _, _ = self.forward(observation, deterministic=deterministic)
+        return actions
+
+    # SB3 calls these during training/eval:
+    def evaluate_actions(
+        self,
+        obs: th.Tensor,
+        actions: th.Tensor,
+    ) -> Tuple[th.Tensor, th.Tensor, Dict[str, th.Tensor]]:
+        """
+        Returns value_mean, log_prob, and distribution entropy.
+        """
+        features = self._get_features(obs)
+        logits = self.action_net(features)
+        dist = self._get_action_dist_from_latent(logits)
+        log_prob = dist.log_prob(actions)
+        entropy = dist.entropy()
+
+        quantiles = self._predict_quantiles(features, tau=None)         # [B, Q, 1]
+        value_mean = quantiles.mean(dim=1).squeeze(-1)                  # [B]
+
+        # Expose quantiles for your custom loss if your PPO wrapper uses it
+        extra = {"quantiles": quantiles}  # [B, Q, 1]
+        return value_mean, log_prob, {"entropy": entropy, **extra}
+
+    # Convenience to fetch quantiles explicitly (e.g., in custom rollout buffer)
+    def predict_value_quantiles(
+        self, obs: th.Tensor, tau: Optional[th.Tensor] = None
+    ) -> th.Tensor:
+        features = self._get_features(obs)
+        return self._predict_quantiles(features, tau=tau)
+
+
 class QuantilePPO(OnPolicyAlgorithm):
     """
     Quantile-PPO by extending OnPolicyAlgorithm and using quantile regression and distribution log-prob.
     """
     def __init__(
         self,
-        policy: Union[str, Type[QuantileActorCriticPolicy]] = QuantileActorCriticPolicy,
+        policy: Union[str, Type[ActorCriticPolicy]] = QuantileActorCriticPolicy,
         env: Union[GymEnv, str] = None,
         n_quantiles: int = 32,
         learning_rate: Union[float, Callable[[float], float]] = 3e-4,
